@@ -987,9 +987,9 @@ class TaskManager(BaseManager):
         should_bypass_synth = 'bypass_synth' in meta_info and meta_info['bypass_synth'] == True
         filler = random.choice((FILLER_DICT[filler_class]))
         await self._handle_llm_output(next_step, filler, should_bypass_synth, new_meta_info, is_filler = True)
-
-    async def __execute_function_call(self, url, method, param, api_token, model_args, meta_info, next_step, called_fun, **resp):
-        self.check_if_user_online = False
+    
+    async def __execute_function_call(self, tool_call_id, is_lite_llm, url, method, param, api_token, model_args, meta_info, next_step, called_fun, **resp):
+        self.check_if_user_online = False 
 
         if called_fun.startswith("transfer_call"):
             logger.info(f"Transfer call function called param {param}. First sleeping for 2 seconds to make sure we're done speaking the filler")
@@ -1047,6 +1047,8 @@ class TaskManager(BaseManager):
 
         content = FUNCTION_CALL_PROMPT.format(called_fun, method, set_response_prompt)
         model_args["messages"].append({"role": "system","content": content})
+        if(is_lite_llm):
+            model_args["messages"].append({"role": "tool", "tool_call_id": tool_call_id, "content": function_response})
         logger.info(f"Logging function call parameters ")
         convert_to_request_log(function_response, meta_info , None, "function_call", direction = "response", is_cached= False, run_id = self.run_id)
 
@@ -1105,11 +1107,11 @@ class TaskManager(BaseManager):
 
         async for llm_message in self.tools['llm_agent'].generate(messages, synthesize=synthesize, meta_info=meta_info):
             logger.info(f"llm_message {llm_message}")
-            data, end_of_llm_stream, latency, trigger_function_call = llm_message
+            data, end_of_llm_stream, latency, trigger_function_call, tool_call_id, is_lite_llm = llm_message
 
             if trigger_function_call:
                 logger.info(f"Triggering function call for {data}")
-                self.llm_task = asyncio.create_task(self.__execute_function_call(next_step = next_step, **data))
+                self.llm_task = asyncio.create_task(self.__execute_function_call(tool_call_id = tool_call_id, is_lite_llm = is_lite_llm, next_step = next_step, **data))
                 return
 
             if latency and (len(self.llm_latencies) == 0 or self.llm_latencies[-1] != latency):
